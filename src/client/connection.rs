@@ -1,22 +1,37 @@
 use async_channel::{Receiver, Sender};
 use gio::prelude::SettingsExt;
 use mpd::{
-    Channel, Client, EditAction, GroupedValues, Id, Idle, Output, Query, ReplayGain, SaveMode, Status, Subsystem, Term, Version, error::{Error as MpdError, ProtoError, Result as MpdResult, ServerError, ErrorCode as MpdErrorCode}, search::Window, song::PosIdChange
+    error::{
+        Error as MpdError, ErrorCode as MpdErrorCode, ProtoError, Result as MpdResult, ServerError,
+    },
+    search::Window,
+    song::PosIdChange,
+    Channel, Client, EditAction, GroupedValues, Id, Idle, Output, Query, ReplayGain, SaveMode,
+    Status, Subsystem, Term, Version,
 };
 use oneshot::Sender as OneShotSender;
 use rand::seq::SliceRandom;
 use resolve_path::PathResolveExt;
 use rustc_hash::FxHashSet;
 use std::{
-    borrow::Cow, cmp::Ordering as StdOrdering, net::TcpStream, ops::Range, os::unix::net::UnixStream, result
+    borrow::Cow, cmp::Ordering as StdOrdering, net::TcpStream, ops::Range,
+    os::unix::net::UnixStream, result,
 };
 
 use crate::{
-    cache::sqlite, client::stream::StreamWrapper, common::{AlbumInfo, DynamicPlaylist, SongInfo, Stickers, dynamic_playlist::{Ordering, QueryLhs, Rule, StickerObjectType, StickerOperation}, inode::INodeInfo}, player::PlaybackFlow, utils::{self, save_and_register_image}
+    cache::sqlite,
+    client::stream::StreamWrapper,
+    common::{
+        dynamic_playlist::{Ordering, QueryLhs, Rule, StickerObjectType, StickerOperation},
+        inode::INodeInfo,
+        AlbumInfo, DynamicPlaylist, SongInfo, Stickers,
+    },
+    player::PlaybackFlow,
+    utils::{self, save_and_register_image},
 };
 
-use super::{get_past_unix_timestamp, password, FETCH_LIMIT, BATCH_SIZE};
 use super::StickerSetMode;
+use super::{get_past_unix_timestamp, password, BATCH_SIZE, FETCH_LIMIT};
 
 fn cmp_options_nulls_last<T: Ord>(a: Option<&T>, b: Option<&T>) -> StdOrdering {
     match (a, b) {
@@ -226,7 +241,7 @@ pub enum Task {
         /// Value (RHS)
         Cow<'static, str>,
         Window,
-        Responder<Vec<String>>
+        Responder<Vec<String>>,
     ),
     GetPlaylists(Responder<Vec<INodeInfo>>),
     LoadPlaylist(String, Responder<()>),
@@ -274,7 +289,7 @@ pub enum Task {
         /// From version
         u32,
         Window,
-        Responder<Vec<PosIdChange>>
+        Responder<Vec<PosIdChange>>,
     ),
     UpdateDb(Responder<u32>),
     /// Get a song's embedded cover.
@@ -283,7 +298,7 @@ pub enum Task {
         /// URI to song file
         String,
         /// Full paths to high-resolution and low-resolution file, respectively
-        Responder<Option<(String, String)>>
+        Responder<Option<(String, String)>>,
     ),
     /// Get a song's folder cover (cover.jpg/png/webp in the same folder).
     /// Will try to download from MPD if one isn't already available locally.
@@ -291,10 +306,15 @@ pub enum Task {
         /// URI to folder with trailing slash
         String,
         /// Full paths to high-resolution and low-resolution file, respectively
-        Responder<Option<(String, String)>>
+        Responder<Option<(String, String)>>,
     ),
     /// Query distinct values of a tag, optionally grouped by another
-    List(Term<'static>, Query<'static>, Option<&'static str>, Responder<GroupedValues>),
+    List(
+        Term<'static>,
+        Query<'static>,
+        Option<&'static str>,
+        Responder<GroupedValues>,
+    ),
     Find(Query<'static>, Window, Responder<Vec<SongInfo>>),
     LsInfo(String, Responder<Vec<INodeInfo>>),
     GetPlaylist(
@@ -302,7 +322,7 @@ pub enum Task {
         String,
         /// Fetch window. Do NOT use when connected to clients older than v0.24.
         Option<std::ops::Range<u32>>,
-        Responder<Vec<SongInfo>>
+        Responder<Vec<SongInfo>>,
     ),
     /// Append song at URI to queue.
     Add(String, Responder<Id>),
@@ -319,15 +339,15 @@ pub enum Task {
     EnableTagTypes(
         /// If none, will enable all tag types
         Option<Vec<&'static str>>,
-        Responder<()>
+        Responder<()>,
     ),
     ResolveDynamicPlaylist(
         /// The DP itself
         DynamicPlaylist,
         /// Cache to SQLite?
         bool,
-        Responder<Vec<SongInfo>>
-    )
+        Responder<Vec<SongInfo>>,
+    ),
 }
 
 /// Asynchronous wrapper around an rust-mpd client instance.
@@ -354,7 +374,7 @@ pub struct Connection {
     /// For sending idle subsystem notifications to the wrapper.
     idle_sender: Option<Sender<Subsystem>>,
     max_retries: u32,
-    retries_left: u32
+    retries_left: u32,
 }
 
 impl Connection {
@@ -364,7 +384,7 @@ impl Connection {
         // high_receiver: Receiver<Task<'a>>,
         wake_channel: Channel,
         idle_sender: Option<Sender<Subsystem>>,
-        max_retries: u32
+        max_retries: u32,
     ) -> Self {
         Self {
             receiver,
@@ -373,7 +393,7 @@ impl Connection {
             wake_channel,
             idle_sender,
             max_retries,
-            retries_left: max_retries
+            retries_left: max_retries,
         }
     }
 
@@ -424,9 +444,7 @@ impl Connection {
         // dbg!("Successfully authenticated");
 
         // Doubles as a litmus test to see if we are authenticated.
-        client
-            .subscribe(&self.wake_channel)
-            .map_err(Error::Mpd)?;
+        client.subscribe(&self.wake_channel).map_err(Error::Mpd)?;
 
         // dbg!("Subscribed to wake channel");
 
@@ -454,32 +472,35 @@ impl Connection {
     {
         let final_res: Result<T>;
         loop {
-            match self.client.as_mut().map_or(Err(Error::NotConnected), |client| then(client).map_err(Error::Mpd)) {
+            match self
+                .client
+                .as_mut()
+                .map_or(Err(Error::NotConnected), |client| {
+                    then(client).map_err(Error::Mpd)
+                }) {
                 Ok(res) => {
                     final_res = Ok(res);
                     self.retries_left = self.max_retries;
                     break;
                 }
-                Err(e) => {
-                    match e {
-                        Error::Mpd(MpdError::Io(_)) => {
-                            println!("Connection error while performing an action. Reconnecting...");
-                            dbg!(&e);
-                            let _ = self.disconnect();
-                            if self.retries_left > 0 {
-                                self.retries_left -= 1;
-                                let _ = self.connect();
-                            } else {
-                                final_res = Err(e);
-                                break;
-                            }
-                        }
-                        _ => {
+                Err(e) => match e {
+                    Error::Mpd(MpdError::Io(_)) => {
+                        println!("Connection error while performing an action. Reconnecting...");
+                        dbg!(&e);
+                        let _ = self.disconnect();
+                        if self.retries_left > 0 {
+                            self.retries_left -= 1;
+                            let _ = self.connect();
+                        } else {
                             final_res = Err(e);
                             break;
                         }
                     }
-                }
+                    _ => {
+                        final_res = Err(e);
+                        break;
+                    }
+                },
             }
         }
         final_res
@@ -495,8 +516,14 @@ impl Connection {
         let _ = resp.send(self.client_then(then));
     }
 
-    fn maybe_download_image<F>(&mut self, uri: String, download_func: F, resp: Responder<Option<(String, String)>>)
-    where F: Fn(&mut Client<StreamWrapper>, &String) -> MpdResult<Vec<u8>> {
+    fn maybe_download_image<F>(
+        &mut self,
+        uri: String,
+        download_func: F,
+        resp: Responder<Option<(String, String)>>,
+    ) where
+        F: Fn(&mut Client<StreamWrapper>, &String) -> MpdResult<Vec<u8>>,
+    {
         // Always check with our DB first, as multiple calls may be spawned
         // asynchronously when no cover was locally available.
         // Only one of those calls should cause a download; other calls
@@ -507,25 +534,30 @@ impl Connection {
             let _ = resp.send(Ok(Some((hires, thumb))));
         } else {
             // Not available locally => try to download
-            self.respond_with_client(|c| {
-                match download_func(c, &uri) {
-                    Ok(bytes) => {
-                        let dyn_img = image::load_from_memory(&bytes).expect("Unable to read image from bytes");
-                        Ok(save_and_register_image(Some(dyn_img), &uri, None))
+            self.respond_with_client(
+                |c| {
+                    match download_func(c, &uri) {
+                        Ok(bytes) => {
+                            let dyn_img = image::load_from_memory(&bytes)
+                                .expect("Unable to read image from bytes");
+                            Ok(save_and_register_image(Some(dyn_img), &uri, None))
+                        }
+                        Err(MpdError::Proto(ProtoError::NotPair)) => {
+                            println!("GetEmbeddedCover: empty output");
+                            // Empty output. Treat as not available.
+                            Ok(None)
+                        }
+                        Err(MpdError::Server(ServerError {
+                            code: MpdErrorCode::NoExist,
+                            pos: _,
+                            command: _,
+                            detail: _,
+                        })) => Ok(None),
+                        Err(e) => Err(e),
                     }
-                    Err(MpdError::Proto(ProtoError::NotPair)) => {
-                        println!("GetEmbeddedCover: empty output");
-                        // Empty output. Treat as not available.
-                        Ok(None)
-                    }
-                    Err(MpdError::Server(ServerError {code: MpdErrorCode::NoExist, pos: _, command: _, detail: _})) => {
-                        Ok(None)
-                    }
-                    Err(e) => {
-                        Err(e)
-                    }
-                }
-            }, resp);
+                },
+                resp,
+            );
         }
     }
 
@@ -542,14 +574,16 @@ impl Connection {
         let only_in = only_in.unwrap_or(String::from(""));
         let mut res: Vec<String> = Vec::new();
         while more && (curr_len) < FETCH_LIMIT {
-            let mut names = self.client_then(|c| c.find_sticker_op(
-                obj.to_str(),
-                &only_in,
-                &sticker,
-                op.to_mpd_syntax(),
-                &rhs,
-                Window::from((curr_len as u32, (curr_len + BATCH_SIZE) as u32))
-            ))?;
+            let mut names = self.client_then(|c| {
+                c.find_sticker_op(
+                    obj.to_str(),
+                    &only_in,
+                    &sticker,
+                    op.to_mpd_syntax(),
+                    &rhs,
+                    Window::from((curr_len as u32, (curr_len + BATCH_SIZE) as u32)),
+                )
+            })?;
             if !names.is_empty() {
                 // If not searching directly by song (for example by album rating), further resolve to URI.
                 match obj {
@@ -566,21 +600,26 @@ impl Connection {
                                 // to SongInfo. Instead we pluck the URI straight from the raw mpd::Song
                                 // object. Should be faster.
                                 if c.version.1 < 24 {
-                                    Ok(
-                                        c.playlist(&playlist_name, None::<Range<u32>>)?
-                                         .into_iter().map(|s| s.file).collect::<Vec<String>>()
-                                    )
+                                    Ok(c.playlist(&playlist_name, None::<Range<u32>>)?
+                                        .into_iter()
+                                        .map(|s| s.file)
+                                        .collect::<Vec<String>>())
                                 } else {
                                     // For MPD 0.24+, use the new paged loading
                                     let mut curr_len: u32 = 0;
                                     let mut more: bool = true;
                                     let mut inner_res: Vec<String> = Vec::new();
                                     while more && (curr_len as usize) < FETCH_LIMIT {
-                                        let songs = c.playlist(&playlist_name, Some(curr_len..(curr_len + BATCH_SIZE as u32)))?;
+                                        let songs = c.playlist(
+                                            &playlist_name,
+                                            Some(curr_len..(curr_len + BATCH_SIZE as u32)),
+                                        )?;
                                         more = songs.len() >= BATCH_SIZE;
                                         if !songs.is_empty() {
                                             curr_len += songs.len() as u32;
-                                            inner_res.append(&mut songs.into_iter().map(|s| s.file).collect());
+                                            inner_res.append(
+                                                &mut songs.into_iter().map(|s| s.file).collect(),
+                                            );
                                         }
                                     }
                                     Ok(inner_res)
@@ -595,10 +634,15 @@ impl Connection {
                             let mut query = Query::new();
                             query.and(Term::Tag(Cow::Borrowed(tag_type_str)), tag_value);
                             while more && (curr_len) < FETCH_LIMIT {
-                                let songs = self.client_then(|c| c.find(
-                                    &query,
-                                    Window::from((curr_len as u32, (curr_len + BATCH_SIZE) as u32))
-                                ))?;
+                                let songs = self.client_then(|c| {
+                                    c.find(
+                                        &query,
+                                        Window::from((
+                                            curr_len as u32,
+                                            (curr_len + BATCH_SIZE) as u32,
+                                        )),
+                                    )
+                                })?;
                                 if !songs.is_empty() {
                                     res.append(&mut songs.into_iter().map(|s| s.file).collect());
                                     curr_len += BATCH_SIZE;
@@ -617,7 +661,11 @@ impl Connection {
         Ok(res)
     }
 
-    fn resolve_dynamic_playlist_rules(&mut self, dp: DynamicPlaylist, cache: bool) -> Result<Vec<SongInfo>> {
+    fn resolve_dynamic_playlist_rules(
+        &mut self,
+        dp: DynamicPlaylist,
+        cache: bool,
+    ) -> Result<Vec<SongInfo>> {
         // Resolve filter rules
         // First, separate the search query-based conditions from the sticker ones.
         self.client_then(|c| c.tagtypes_clear())?;
@@ -634,7 +682,8 @@ impl Connection {
                 }
                 Rule::LastModified(secs) => {
                     // Special case: query current system datetime
-                    query_clauses.push((QueryLhs::LastMod, get_past_unix_timestamp(secs).to_string()));
+                    query_clauses
+                        .push((QueryLhs::LastMod, get_past_unix_timestamp(secs).to_string()));
                 }
             }
         }
@@ -652,10 +701,12 @@ impl Connection {
         let mut curr_len: usize = 0;
         let mut more: bool = true;
         while more && (curr_len) < FETCH_LIMIT {
-            let songs = self.client_then(|c| c.find(
-                &mpd_query,
-                Window::from((curr_len as u32, (curr_len + BATCH_SIZE) as u32))
-            ))?;
+            let songs = self.client_then(|c| {
+                c.find(
+                    &mpd_query,
+                    Window::from((curr_len as u32, (curr_len + BATCH_SIZE) as u32)),
+                )
+            })?;
             if !songs.is_empty() {
                 for song in songs.into_iter() {
                     uris.insert(song.file);
@@ -678,9 +729,13 @@ impl Connection {
                         clause.0,
                         clause.1.into(),
                         clause.2,
-                        get_past_unix_timestamp(clause.3.parse::<i64>().unwrap()).to_string().into(),
-                        None
-                    )? {set.insert(uri);}
+                        get_past_unix_timestamp(clause.3.parse::<i64>().unwrap())
+                            .to_string()
+                            .into(),
+                        None,
+                    )? {
+                        set.insert(uri);
+                    }
                 }
                 _ => {
                     for uri in self.get_uris_by_sticker(
@@ -688,8 +743,10 @@ impl Connection {
                         clause.1.into(),
                         clause.2,
                         clause.3.into(),
-                        None
-                    )? {set.insert(uri);}
+                        None,
+                    )? {
+                        set.insert(uri);
+                    }
                 }
             }
 
@@ -722,13 +779,13 @@ impl Connection {
 
         let mut songs_stickers: Vec<(SongInfo, Stickers)> = Vec::with_capacity(uris.len());
         for uri in uris.into_iter() {
-            let mut found_songs = self.client_then(|c| c.find(
-                Query::new().and(Term::File, &uri),
-                        Window::from((0, 1))
-            ))?;
+            let mut found_songs = self.client_then(|c| {
+                c.find(Query::new().and(Term::File, &uri), Window::from((0, 1)))
+            })?;
             if !found_songs.is_empty() {
                 let song = std::mem::take(&mut found_songs[0]);
-                let stickers = Stickers::from_mpd_kv(self.client_then(|c| c.stickers("song", &uri))?);
+                let stickers =
+                    Stickers::from_mpd_kv(self.client_then(|c| c.stickers("song", &uri))?);
                 songs_stickers.push((song.into(), stickers));
             }
         }
@@ -762,7 +819,7 @@ impl Connection {
     pub fn run(&mut self) -> Result<()> {
         loop {
             let mut curr_task: Option<Task> = None;
-            if !self.receiver.is_empty() || self.idle_sender.is_none() {
+            if !self.receiver.is_empty() || self.idle_sender.is_none() || self.client.is_none() {
                 curr_task = Some(
                     self.receiver
                         .recv_blocking()
@@ -789,20 +846,23 @@ impl Connection {
                     Task::SendMessage(content, resp) => {
                         let wake_channel = self.wake_channel.clone();
                         self.respond_with_client(
-                            move |c| c.sendmessage(&wake_channel, &content), resp
+                            move |c| c.sendmessage(&wake_channel, &content),
+                            resp,
                         )
-                    },
+                    }
                     Task::GetVolume(resp) => self.respond_with_client(|c| c.getvol(), resp),
                     Task::SetVolume(val, resp) => self.respond_with_client(|c| c.volume(val), resp),
                     Task::GetOutputs(resp) => self.respond_with_client(|c| c.outputs(), resp),
-                    Task::SetOutput(id, state, resp) => self.respond_with_client(
-                        |c| c.output(id, state), resp
+                    Task::SetOutput(id, state, resp) => {
+                        self.respond_with_client(|c| c.output(id, state), resp)
+                    }
+                    Task::GetSticker(typ, uri, name, resp) => {
+                        self.respond_with_client(|c| c.sticker(typ, &uri, &name), resp)
+                    }
+                    Task::GetKnownStickers(typ, uri, resp) => self.respond_with_client(
+                        |c| c.stickers(typ, &uri).map(Stickers::from_mpd_kv),
+                        resp,
                     ),
-                    Task::GetSticker(typ, uri, name, resp) => self.respond_with_client(
-                        |c| c.sticker(typ, &uri, &name), resp
-                    ),
-                    Task::GetKnownStickers(typ, uri, resp) => self
-                        .respond_with_client(|c| c.stickers(typ, &uri).map(Stickers::from_mpd_kv), resp),
                     Task::SetSticker(typ, uri, name, val, mode, resp) => self.respond_with_client(
                         |c| match mode {
                             StickerSetMode::Inc => c.inc_sticker(typ, &uri, &name, &val),
@@ -811,24 +871,31 @@ impl Connection {
                         },
                         resp,
                     ),
-                    Task::DeleteSticker(typ, uri, name, resp) => self.respond_with_client(
-                        |c| c.delete_sticker(typ, &uri, &name), resp
-                    ),
-                    Task::FindStickerOp(typ, base_uri, name, op, value, window, resp) => self.respond_with_client(
-                        |c| c.find_sticker_op(typ, &base_uri, &name, op, &value, window), resp
-                    ),
+                    Task::DeleteSticker(typ, uri, name, resp) => {
+                        self.respond_with_client(|c| c.delete_sticker(typ, &uri, &name), resp)
+                    }
+                    Task::FindStickerOp(typ, base_uri, name, op, value, window, resp) => self
+                        .respond_with_client(
+                            |c| c.find_sticker_op(typ, &base_uri, &name, op, &value, window),
+                            resp,
+                        ),
                     Task::GetPlaylists(resp) => self.respond_with_client(
-                        |c| c.playlists().map(
-                            |playlists| playlists.into_iter().map(INodeInfo::from).collect()
-                        ), resp
+                        |c| {
+                            c.playlists().map(|playlists| {
+                                playlists.into_iter().map(INodeInfo::from).collect()
+                            })
+                        },
+                        resp,
                     ),
-                    Task::LoadPlaylist(name, resp) => self.respond_with_client(|c| c.load(&name, ..), resp),
-                    Task::SaveQueueAsPlaylist(name, mode, resp) => self.respond_with_client(
-                        |c| c.save(&name, Some(mode)), resp
-                    ),
-                    Task::RenamePlaylist(old, new, resp) => self.respond_with_client(
-                        |c| c.pl_rename(&old, &new), resp
-                    ),
+                    Task::LoadPlaylist(name, resp) => {
+                        self.respond_with_client(|c| c.load(&name, ..), resp)
+                    }
+                    Task::SaveQueueAsPlaylist(name, mode, resp) => {
+                        self.respond_with_client(|c| c.save(&name, Some(mode)), resp)
+                    }
+                    Task::RenamePlaylist(old, new, resp) => {
+                        self.respond_with_client(|c| c.pl_rename(&old, &new), resp)
+                    }
                     Task::EditPlaylist(actions, resp) => {
                         self.respond_with_client(|c| c.pl_edit(&actions), resp)
                     }
@@ -876,76 +943,108 @@ impl Connection {
                         },
                         resp,
                     ),
-                    Task::SetCrossfade(fade, resp) => self.respond_with_client(|c| c.crossfade(fade), resp),
+                    Task::SetCrossfade(fade, resp) => {
+                        self.respond_with_client(|c| c.crossfade(fade), resp)
+                    }
                     Task::SetReplayGain(mode, resp) => {
                         self.respond_with_client(|c| c.replaygain(mode), resp)
                     }
-                    Task::SetMixRampDb(db, resp) => self.respond_with_client(|c| c.mixrampdb(db), resp),
+                    Task::SetMixRampDb(db, resp) => {
+                        self.respond_with_client(|c| c.mixrampdb(db), resp)
+                    }
                     Task::SetMixRampDelay(delay, resp) => {
                         self.respond_with_client(|c| c.mixrampdelay(delay), resp)
                     }
-                    Task::SetRandom(state, resp) => self.respond_with_client(|c| c.random(state), resp),
-                    Task::SetConsume(state, resp) => self.respond_with_client(|c| c.consume(state), resp),
+                    Task::SetRandom(state, resp) => {
+                        self.respond_with_client(|c| c.random(state), resp)
+                    }
+                    Task::SetConsume(state, resp) => {
+                        self.respond_with_client(|c| c.consume(state), resp)
+                    }
                     Task::Pause(state, resp) => self.respond_with_client(|c| c.pause(state), resp),
                     Task::Stop(resp) => self.respond_with_client(|c| c.stop(), resp),
                     Task::Prev(resp) => self.respond_with_client(|c| c.prev(), resp),
                     Task::Next(resp) => self.respond_with_client(|c| c.next(), resp),
                     Task::PlayAtId(id, resp) => self.respond_with_client(|c| c.switch(id), resp),
                     Task::PlayAtPos(pos, resp) => self.respond_with_client(|c| c.switch(pos), resp),
-                    Task::SwapPos(p1, p2, resp) => self.respond_with_client(|c| c.swap(p1, p2), resp),
+                    Task::SwapPos(p1, p2, resp) => {
+                        self.respond_with_client(|c| c.swap(p1, p2), resp)
+                    }
                     Task::DeleteAtPos(p, resp) => self.respond_with_client(|c| c.delete(p), resp),
                     Task::ClearQueue(resp) => self.respond_with_client(|c| c.clear(), resp),
                     Task::Seek(pos, resp) => self.respond_with_client(|c| c.rewind(pos), resp),
                     Task::GetQueue(window, resp) => self.respond_with_client(
-                        |c| c.queue(window).map(
-                            |mpd_songs| mpd_songs.into_iter().map(SongInfo::from).collect()
-                        ),
-                        resp
+                        |c| {
+                            c.queue(window).map(|mpd_songs| {
+                                mpd_songs.into_iter().map(SongInfo::from).collect()
+                            })
+                        },
+                        resp,
                     ),
-                    Task::GetQueueChanges(since, window, resp) => self.respond_with_client(
-                        |c| c.changesposid(since, window), resp
-                    ),
+                    Task::GetQueueChanges(since, window, resp) => {
+                        self.respond_with_client(|c| c.changesposid(since, window), resp)
+                    }
                     Task::UpdateDb(resp) => self.respond_with_client(|c| c.update(), resp),
-                    Task::GetEmbeddedCover(uri, resp) => self.maybe_download_image(
-                        uri,
-                        |client, uri| {client.readpicture(uri)},
-                        resp
-                    ),
+                    Task::GetEmbeddedCover(uri, resp) => {
+                        self.maybe_download_image(uri, |client, uri| client.readpicture(uri), resp)
+                    }
                     Task::GetFolderCover(folder_uri, resp) => self.maybe_download_image(
                         folder_uri,
-                        |client, uri| {client.albumart(uri)},
-                        resp
+                        |client, uri| client.albumart(uri),
+                        resp,
                     ),
-                    Task::List(term, query, groupby, resp) => self.respond_with_client(
-                        |c| c.list(&term, &query, groupby), resp
-                    ),
+                    Task::List(term, query, groupby, resp) => {
+                        self.respond_with_client(|c| c.list(&term, &query, groupby), resp)
+                    }
                     Task::Find(query, window, resp) => self.respond_with_client(
-                        |c| c.find(&query, window).map(|mpd_songs| {
-                            mpd_songs.into_iter().map(SongInfo::from).collect()
-                        }
-                    ), resp),
-                    Task::LsInfo(path, resp) => self.respond_with_client(|c| {
-                        c.lsinfo(&path)
-                         .map(|entries| entries.into_iter().map(INodeInfo::from).collect())
-                    }, resp),
+                        |c| {
+                            c.find(&query, window).map(|mpd_songs| {
+                                mpd_songs.into_iter().map(SongInfo::from).collect()
+                            })
+                        },
+                        resp,
+                    ),
+                    Task::LsInfo(path, resp) => self.respond_with_client(
+                        |c| {
+                            c.lsinfo(&path)
+                                .map(|entries| entries.into_iter().map(INodeInfo::from).collect())
+                        },
+                        resp,
+                    ),
                     Task::GetPlaylist(name, window, resp) => self.respond_with_client(
-                        |c| c.playlist(&name, window.clone()).map(
-                            |mpd_songs| mpd_songs.into_iter().map(SongInfo::from).collect()
-                        ), resp
+                        |c| {
+                            c.playlist(&name, window.clone()).map(|mpd_songs| {
+                                mpd_songs.into_iter().map(SongInfo::from).collect()
+                            })
+                        },
+                        resp,
                     ),
                     Task::Add(uri, resp) => self.respond_with_client(|c| c.push(&uri), resp),
-                    Task::AddMultiple(uris, resp) => self.respond_with_client(|c| c.push_multiple(&uris), resp),
-                    Task::Insert(uri, pos, resp) => self.respond_with_client(|c| c.insert(&uri, pos), resp),
-                    Task::InsertMultiple(uris, pos, resp) => self.respond_with_client(|c| c.insert_multiple(&uris, pos), resp),
-                    Task::FindAdd(query, resp) => self.respond_with_client(|c| c.findadd(&query), resp),
-                    Task::ClearTagTypes(resp) => self.respond_with_client(|c| c.tagtypes_clear(), resp),
-                    Task::EnableTagTypes(types, resp) => self.respond_with_client(move |c| {
-                        if let Some(types) = types.as_deref() {
-                            c.tagtypes_enable(types)
-                        } else {
-                            c.tagtypes_all()
-                        }
-                    }, resp),
+                    Task::AddMultiple(uris, resp) => {
+                        self.respond_with_client(|c| c.push_multiple(&uris), resp)
+                    }
+                    Task::Insert(uri, pos, resp) => {
+                        self.respond_with_client(|c| c.insert(&uri, pos), resp)
+                    }
+                    Task::InsertMultiple(uris, pos, resp) => {
+                        self.respond_with_client(|c| c.insert_multiple(&uris, pos), resp)
+                    }
+                    Task::FindAdd(query, resp) => {
+                        self.respond_with_client(|c| c.findadd(&query), resp)
+                    }
+                    Task::ClearTagTypes(resp) => {
+                        self.respond_with_client(|c| c.tagtypes_clear(), resp)
+                    }
+                    Task::EnableTagTypes(types, resp) => self.respond_with_client(
+                        move |c| {
+                            if let Some(types) = types.as_deref() {
+                                c.tagtypes_enable(types)
+                            } else {
+                                c.tagtypes_all()
+                            }
+                        },
+                        resp,
+                    ),
                     Task::ResolveDynamicPlaylist(dp, cache, resp) => {
                         let _ = resp.send(self.resolve_dynamic_playlist_rules(dp, cache));
                     }
