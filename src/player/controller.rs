@@ -1148,7 +1148,7 @@ impl Player {
                 && (0.0..1.5).contains(&secs_to_end)
             {
                 println!("Stopping PipeWire backend to allow samplerate change...");
-                self.maybe_stop_fft_thread(false); // FIXME: we can't block while runnin in an async loop
+                self.maybe_stop_fft_thread(false); // FIXME: we can't block while running in an async loop
             }
         } else {
             self.set_position(0.0);

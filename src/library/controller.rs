@@ -345,11 +345,11 @@ impl Library {
     /// Get all playlists
     pub async fn init_playlists(&self, refresh: bool) -> ClientResult<()> {
         if refresh || !self.imp().playlists_initialized.get() {
+            self.imp().playlists_initialized.set(true);
             self.imp().playlists.remove_all();
             self.imp()
                 .playlists
                 .extend_from_slice(&self.client().get_playlists().await?);
-            self.imp().playlists_initialized.set(true);
         }
         Ok(())
     }
@@ -357,6 +357,7 @@ impl Library {
     /// Get all dynamic playlists
     pub async fn init_dyn_playlists(&self, refresh: bool) -> ClientResult<()> {
         if !self.imp().dyn_playlists_initialized.get() || refresh {
+            self.imp().dyn_playlists_initialized.set(true);
             self.imp().dyn_playlists.remove_all();
             let inode_infos = gio::spawn_blocking(sqlite::get_dynamic_playlists)
                 .await
@@ -369,7 +370,6 @@ impl Library {
                     .map(INode::from)
                     .collect::<Vec<INode>>(),
             );
-            self.imp().dyn_playlists_initialized.set(true);
         }
         Ok(())
     }
@@ -524,17 +524,18 @@ impl Library {
 
     pub async fn get_folder_contents(&self) -> ClientResult<()> {
         if !self.imp().folder_inodes_initialized.get() {
+            self.imp().folder_inodes_initialized.set(true);
             self.imp().folder_inodes.remove_all();
             self.imp().folder_inodes.extend_from_slice(
                 &self.client().lsinfo(self.folder_path()).await?
             );
-            self.imp().folder_inodes_initialized.set(true);
         }
         Ok(())
     }
 
     pub async fn init_recent(&self, refresh: bool) -> ClientResult<()> {
         if !self.imp().recent_initialized.get() || refresh {
+            self.imp().recent_initialized.set(true);
             let model = self.imp().recent_songs.clone();
             model.remove_all();
             let settings = settings_manager().child("library");
@@ -550,34 +551,32 @@ impl Library {
             let model = self.imp().recent_artists.clone();
             model.remove_all();
             self.client().get_recent_artists(&mut |artist| {model.append(&artist);}).await?;
-
-            self.imp().recent_initialized.set(true);
         }
         Ok(())
     }
 
     pub async fn init_albums(&self) -> ClientResult<()> {
         if !self.imp().albums_initialized.get() {
+            self.imp().albums_initialized.set(true);
             let model = self.imp().albums.clone();
             model.remove_all();
 
             self.client().get_albums_by_query(Query::new(), &mut |album| {
                 model.append(&album);
             }).await?;
-            self.imp().albums_initialized.set(true);
         }
         Ok(())
     }
 
     pub async fn init_artists(&self, use_album_artist: bool) -> ClientResult<()> {
         if !self.imp().artists_initialized.get() {
+            self.imp().artists_initialized.set(true);
             let model = self.imp().artists.clone();
             model.remove_all();
 
             self.client().get_artists(use_album_artist, &mut |artist| {
                 model.append(&artist);
             }).await?;
-            self.imp().artists_initialized.set(true);
         }
         Ok(())
     }
