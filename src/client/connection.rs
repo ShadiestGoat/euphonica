@@ -451,6 +451,9 @@ impl Connection {
         let version = client.version;
         self.client.replace(client);
 
+        // Reset retry counter upon successful connection.
+        self.retries_left = self.max_retries;
+
         Ok(version)
     }
 
@@ -480,11 +483,10 @@ impl Connection {
                 }) {
                 Ok(res) => {
                     final_res = Ok(res);
-                    self.retries_left = self.max_retries;
                     break;
                 }
                 Err(e) => match e {
-                    Error::Mpd(MpdError::Io(_)) => {
+                    Error::Mpd(MpdError::Io(_)) | Error::NotConnected => {
                         println!("Connection error while performing an action. Reconnecting...");
                         dbg!(&e);
                         let _ = self.disconnect();
