@@ -237,6 +237,8 @@ mod imp {
         // using the old logic. Else do nothing.
         pub queue_version: Cell<u32>,
         pub expected_queue_version: Cell<u32>,
+        // Used to silence idle subsystem messages about volume changes invoked by us.
+        pub expected_volume_changes: Cell<u32>,
     }
 
     #[glib::object_subclass]
@@ -298,6 +300,7 @@ mod imp {
                 is_foreground: Cell::new(false),
                 queue_version: Cell::new(0),
                 expected_queue_version: Cell::new(0),
+                expected_volume_changes: Cell::new(0)
             }
         }
     }
@@ -611,6 +614,15 @@ impl Player {
             .await
     }
 
+    fn maybe_emit_volume_changed(&self, vol: i8) {
+        let curr_expected = self.imp().expected_volume_changes.get();
+        if curr_expected > 0 {
+            self.imp().expected_volume_changes.set(curr_expected - 1);
+        } else {
+            self.emit_by_name::<()>("volume-changed", &[&vol]);
+        }
+    }
+
     pub fn is_foreground(&self) -> bool {
         self.imp().is_foreground.get()
     }
@@ -745,7 +757,7 @@ impl Player {
                                 this.update_outputs().await?;
                             }
                             Subsystem::Mixer => {
-                                this.emit_by_name::<()>("volume-changed", &[&this.client()?.get_volume().await?]);
+                                this.maybe_emit_volume_changed(this.client()?.get_volume().await?);
                             }
                             _ => {}
                         };
@@ -936,7 +948,7 @@ impl Player {
         let new_vol = status.volume;
         let old_vol = self.imp().volume.replace(new_vol);
         if old_vol != new_vol {
-            self.emit_by_name::<()>("volume-changed", &[&new_vol]);
+            self.maybe_emit_volume_changed(new_vol);
             if self.imp().mpris_enabled.get() {
                 mpris_changes.push(Property::Volume(new_vol as f64 / 100.0));
             }
@@ -1543,6 +1555,7 @@ impl Player {
         let old_vol = self.imp().volume.replace(val);
         if old_vol != val {
             self.client()?.set_volume(val).await?;
+            self.imp().expected_volume_changes.set(self.imp().expected_volume_changes.get() + 1);
         }
         Ok(())
     }
