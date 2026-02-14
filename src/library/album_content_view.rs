@@ -265,8 +265,8 @@ mod imp {
                             #[weak]
                             obj,
                             async move {
-                                obj.schedule_cover().await;
                                 obj.update_meta(true).await;
+                                obj.schedule_cover(true).await;
                             }
                         ));
                     }
@@ -721,10 +721,15 @@ impl AlbumContentView {
         self.imp().cover.show(&tex);
     }
 
-    async fn schedule_cover(&self) {
+    async fn schedule_cover(&self, overwrite: bool) {
         self.imp().cover.show_spinner();
         if let Some(info) = self.album().as_ref().map(|a| a.get_info()) {
-            match self.imp().cache.get().unwrap().clone().get_album_cover(
+            let cache = self.imp().cache.get().unwrap().clone();
+            // Remove existing entry in SQLite, which might be an empty "do not retry" placeholder.
+            if overwrite {
+                let _ = cache.clear_cover(info.folder_uri.to_owned()).await;
+            }
+            match cache.get_album_cover(
                 info, false, true
             ).await {
                 Ok(Some(tex)) => {
@@ -851,7 +856,7 @@ impl AlbumContentView {
                         .sum::<u64>() as f64,
                 ));
                 // The extra fluff later
-                this.schedule_cover().await;
+                this.schedule_cover(false).await;
                 this.update_meta(false).await;
             }
         ));

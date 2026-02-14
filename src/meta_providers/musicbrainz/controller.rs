@@ -168,11 +168,7 @@ impl MetadataProvider for MusicBrainzWrapper {
 
             let mut new_images: Vec<models::ImageMeta> =
                 data.images.into_iter().map(CoverArtImage::into).collect();
-
-            println!("[MusicBrainz] Got images: {:?}", new_images);
-
             new_result.image.append(&mut new_images);
-
             println!("[MusicBrainz] Got images: {:?}", new_result.image);
         } else {
             println!("[MusicBrainz] Could not fetch album cover");

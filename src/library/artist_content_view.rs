@@ -266,8 +266,8 @@ mod imp {
                             #[weak]
                             obj,
                             async move {
-                                obj.schedule_avatar().await;
                                 obj.update_meta(true).await;
+                                obj.schedule_avatar(true).await;
                             }
                         ));
                     }
@@ -680,10 +680,14 @@ impl ArtistContentView {
         self.imp().avatar.set_custom_image(tex);
     }
 
-    async fn schedule_avatar(&self) {
+    async fn schedule_avatar(&self, overwrite: bool) {
         self.update_avatar(None);
         if let Some(info) = self.artist().as_ref().map(|a| a.get_info()) {
-            match self.imp().cache.get().unwrap().clone().get_artist_avatar(
+            let cache = self.imp().cache.get().unwrap().clone();
+            if overwrite {
+                let _ = cache.clear_artist_avatar(info.name.to_owned());
+            }
+            match cache.get_artist_avatar(
                 info, false, true  // Content page is the one to fetch external sources
             ).await {
                 Ok(maybe_tex) => {
@@ -754,7 +758,7 @@ impl ArtistContentView {
                 }
 
                 // The extra fluff later
-                this.schedule_avatar().await;
+                this.schedule_avatar(false).await;
                 this.update_meta(false).await;
             }
         ));
