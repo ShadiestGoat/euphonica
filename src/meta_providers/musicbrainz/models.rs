@@ -12,10 +12,7 @@ use musicbrainz_rs::entity::{
 };
 use serde::Deserialize;
 
-use super::{
-    super::{models},
-    PROVIDER_KEY,
-};
+use super::{super::models, PROVIDER_KEY};
 
 // There are more details in the response, but we don't really care about them
 #[derive(Deserialize)]
@@ -39,9 +36,8 @@ fn transform_wikimedia_url(url: &str) -> Option<String> {
     // For now hardcoding downloaded size to 256px wide. Images are usually in portrait orientation
     // so this should work fine.
     if let Some(file_name) = url.strip_prefix("https://commons.wikimedia.org/wiki/File:") {
-        let transformed_url = format!(
-            "https://commons.wikimedia.org/w/thumb.php?f={file_name}&w=256"
-        );
+        let transformed_url =
+            format!("https://commons.wikimedia.org/w/thumb.php?f={file_name}&w=256");
         return Some(transformed_url);
     }
     None

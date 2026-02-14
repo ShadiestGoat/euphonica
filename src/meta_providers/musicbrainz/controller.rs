@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use gtk::prelude::*;
 extern crate bson;
 use reqwest::{
@@ -11,10 +13,15 @@ use musicbrainz_rs::{
     prelude::*,
 };
 
-use crate::{common::{AlbumInfo, ArtistInfo}, config::APPLICATION_USER_AGENT, meta_providers::musicbrainz::models::{CoverArtImage, CoverArtResponse}, utils::meta_provider_settings};
+use crate::{
+    common::{AlbumInfo, ArtistInfo},
+    config::APPLICATION_USER_AGENT,
+    meta_providers::musicbrainz::models::{CoverArtImage, CoverArtResponse}, 
+    utils::meta_provider_settings
+};
 
 use super::{
-    super::{models, prelude::*, MetadataProvider},
+    super::{MetadataProvider, models, prelude::*},
     PROVIDER_KEY,
 };
 
@@ -72,23 +79,26 @@ impl MusicBrainzWrapper {
 
         return None;
     }
+    last_request_time: SystemTime
 }
 
 impl MetadataProvider for MusicBrainzWrapper {
     fn new() -> Self {
         Self {
             client: Client::new(),
+            last_request_time: SystemTime::now()
         }
     }
 
     /// Schedule getting album metadata from MusicBrainz.
     /// A signal will be emitted to notify the caller when the result arrives.
     fn get_album_meta(
-        &self,
+        &mut self,
         key: &mut AlbumInfo,
         existing: Option<models::AlbumMeta>,
     ) -> Option<models::AlbumMeta> {
-        if ! meta_provider_settings(PROVIDER_KEY).boolean("enabled") {
+        sleep_between_requests(self.last_request_time);
+        if !meta_provider_settings(PROVIDER_KEY).boolean("enabled") {
             return existing;
         }
 
@@ -184,17 +194,16 @@ impl MetadataProvider for MusicBrainzWrapper {
     /// Since images have varying aspect ratios, we will use a simple entropy-based cropping
     /// algorithm.
     fn get_artist_meta(
-        &self,
+        &mut self,
         key: &mut ArtistInfo,
         existing: std::option::Option<models::ArtistMeta>,
     ) -> Option<models::ArtistMeta> {
+        sleep_between_requests(self.last_request_time);
         if meta_provider_settings(PROVIDER_KEY).boolean("enabled") {
             if let Some(mbid) = key.mbid.as_ref() {
                 println!("[MusicBrainz] Fetching artist by MBID: {mbid}");
-                let res = Artist::fetch()
-                    .id(mbid)
-                    .with_url_relations()
-                    .execute();
+                let res = Artist::fetch().id(mbid).with_url_relations().execute();
+                self.last_request_time = SystemTime::now();
                 if let Ok(artist) = res {
                     let new: models::ArtistMeta = artist.into();
                     println!("{:?}", &new);
@@ -216,14 +225,10 @@ impl MetadataProvider for MusicBrainzWrapper {
             else {
                 let name = &key.name;
                 println!("[MusicBrainz] Fetching artist with name = {}", &name);
-                let res = Artist::search(
-                    ArtistSearchQuery::query_builder()
-                        .artist(name)
-                        .build(),
-                )
-                .with_url_relations()
-                .execute();
-
+                let res = Artist::search(ArtistSearchQuery::query_builder().artist(name).build())
+                    .with_url_relations()
+                    .execute();
+                self.last_request_time = SystemTime::now();
                 if let Ok(found) = res {
                     if let Some(first) = found.entities.into_iter().nth(0) {
                         let new: models::ArtistMeta = first.into();
@@ -251,10 +256,7 @@ impl MetadataProvider for MusicBrainzWrapper {
     }
 
     /// MusicBrainz does not provide lyrics.
-    fn get_lyrics(
-        &self,
-        _key: &crate::common::SongInfo
-    ) -> Option<models::Lyrics> {
+    fn get_lyrics(&mut self, _key: &crate::common::SongInfo) -> Option<models::Lyrics> {
         None
     }
 }
